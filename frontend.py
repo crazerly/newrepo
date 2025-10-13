@@ -1,294 +1,250 @@
 #!/usr/bin/env python3
-"""
-Anki-like 'Decks' window mockup using Qt (PySide6 / PyQt5 fallback).
-
-Features:
-- Top row of actions: Decks | Add | Browse | Stats
-- Left: nested deck tree (parent/child)
-- Right: deck table with columns: Deck | New | Learn | Due
-- Clicking a deck in the tree selects/highlights the corresponding row in the table
-- Add / Browse / Stats open blank windows
-- No network / sync functionality
-
-Run:
-    python anki_deck_mockup.py
-"""
 
 import sys
 from functools import partial
 
-# Try PySide6, fall back to PyQt5
 try:
+    # Prefer PySide6
     from PySide6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-        QTreeView, QTreeWidget, QTreeWidgetItem, QToolBar, QAction, QLabel, QStatusBar,
-        QDialog, QHeaderView
+        QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSpacerItem,
+        QSizePolicy, QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QDialog,
+        QHeaderView, QToolButton
     )
-    from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QFont
-    from PySide6.QtCore import Qt, QSize
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont, QBrush, QColor
     QT_BACKEND = "PySide6"
 except Exception:
     try:
+        # Fallback PyQt5
         from PyQt5.QtWidgets import (
-            QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-            QTreeView, QTreeWidget, QTreeWidgetItem, QToolBar, QAction, QLabel, QStatusBar,
-            QDialog, QHeaderView
+            QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSpacerItem,
+            QSizePolicy, QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QDialog,
+            QHeaderView, QToolButton
         )
-        from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon, QFont
-        from PyQt5.QtCore import Qt, QSize
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QFont, QBrush, QColor
         QT_BACKEND = "PyQt5"
     except Exception:
-        raise RuntimeError("PySide6 or PyQt5 is required to run this script. Install with `pip install PySide6` or `pip install PyQt5`.")
-
+        raise RuntimeError("PySide6 or PyQt5 is required. Install with `pip install PySide6` or `pip install PyQt5`.")
 
 class BlankDialog(QDialog):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumSize(560, 360)
-        # Blank content for now
         lbl = QLabel(f"{title} — (blank window)", self)
         lbl.setAlignment(Qt.AlignCenter)
         layout = QVBoxLayout(self)
         layout.addWidget(lbl)
 
-
-class DecksWindow(QMainWindow):
+class DecksMockup(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Anki — Decks (mockup)")
-        self.resize(980, 640)
+        self.setWindowTitle("Anki2")
+        self.resize(708, 592) # (width, height)
 
-        # Top toolbar (row of items)
-        self.toolbar = QToolBar()
-        self.toolbar.setIconSize(QSize(16, 16))
-        self.toolbar.setMovable(False)
-        self.addToolBar(Qt.TopToolBarArea, self.toolbar)
-
-        # Actions: Decks (active), Add, Browse, Stats
-        self.act_decks = QAction("Decks", self)
-        self.act_decks.setCheckable(True)
-        self.act_decks.setChecked(True)  # default active
-        self.act_add = QAction("Add", self)
-        self.act_browse = QAction("Browse", self)
-        self.act_stats = QAction("Stats", self)
-
-        # Add to toolbar (group-like visual)
-        self.toolbar.addAction(self.act_decks)
-        self.toolbar.addSeparator()
-        self.toolbar.addAction(self.act_add)
-        self.toolbar.addAction(self.act_browse)
-        self.toolbar.addAction(self.act_stats)
-
-        # Central widget with splitter
         central = QWidget()
-        central_layout = QHBoxLayout()
-        central_layout.setContentsMargins(6, 6, 6, 6)
-        central.setLayout(central_layout)
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(16, 16, 16, 16)
+        central_layout.setSpacing(12)
         self.setCentralWidget(central)
 
-        splitter = QSplitter()
-        splitter.setOrientation(Qt.Horizontal)
-        central_layout.addWidget(splitter)
+        # Top: centered navigation container
+        nav_container = QWidget()
+        nav_container.setObjectName("nav_container")
+        nav_layout = QHBoxLayout(nav_container)
+        nav_layout.setContentsMargins(22, 8, 22, 8)
+        nav_layout.setSpacing(28)
 
-        # Left: deck tree
-        self.deck_tree = QTreeView()
-        self.deck_tree.setHeaderHidden(True)
-        self.deck_tree.setMinimumWidth(260)
-        splitter.addWidget(self.deck_tree)
+        # Add horizontal spacer to center nav_container later
+        central_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        central_layout.addWidget(nav_container, alignment=Qt.AlignHCenter)
+        central_layout.addItem(QSpacerItem(20, 6, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
-        # Right: deck counts in a tree/table (mirrors hierarchy, but has columns)
-        self.deck_table = QTreeWidget()
-        self.deck_table.setColumnCount(4)
-        self.deck_table.setHeaderLabels(["Deck", "New", "Learn", "Due"])
-        self.deck_table.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.deck_table.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.deck_table.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.deck_table.header().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        splitter.addWidget(self.deck_table)
+        # Buttons: Decks, Add, Browse, Stats
+        btn_names = ["Decks", "Add", "Browse", "Stats"]
+        self.nav_buttons = {}
+        for name in btn_names:
+            btn = QPushButton(name)
+            btn.setFlat(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            f = btn.font()
+            f.setPointSize(14)
+            f.setBold(True)
+            btn.setFont(f)
+            # Only non-Decks open a blank window
+            if name != "Decks":
+                btn.clicked.connect(partial(self.open_blank, name))
+            self.nav_buttons[name] = btn
+            nav_layout.addWidget(btn)
 
-        # Status bar
-        self.status = QStatusBar()
-        self.setStatusBar(self.status)
-        self.status.showMessage("Mockup: left = deck tree, right = counts (New/Learn/Due)")
+        # Style nav container & buttons: grey background, white bold text, no hover highlight
+        nav_container.setStyleSheet("""
+            QWidget#nav_container { background: #3a3a3a; border-radius: 10px; }
+            QPushButton { color: white; background: transparent; border: none; padding: 6px 18px; }
+            QPushButton:hover { background: transparent; } 
+            QPushButton:pressed { background: transparent; }
+        """)
 
-        # Populate demo decks and counts
-        self._populate_demo_decks()
+        # Middle: centered deck widget (with vertical spacer above/below)
+        central_layout.addItem(QSpacerItem(20, 8, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
-        # Connect selection changes: tree -> table
-        self.deck_tree.selectionModel().selectionChanged.connect(self._on_tree_selection_changed)
+        mid_box = QHBoxLayout()
+        central_layout.addLayout(mid_box)
+        mid_box.addItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
 
-        # Connect top actions to open blank windows
-        self.act_add.triggered.connect(partial(self._open_blank_window, "Add"))
-        self.act_browse.triggered.connect(partial(self._open_blank_window, "Browse"))
-        self.act_stats.triggered.connect(partial(self._open_blank_window, "Stats"))
-        self.act_decks.triggered.connect(self._on_decks_toggled)
+        # Deck QTreeWidget (Deck | New | Learn | Due)
+        self.deck_widget = QTreeWidget()
+        self.deck_widget.setColumnCount(4)
+        self.deck_widget.setHeaderLabels(["Deck", "New", "Learn", "Due"])
 
-        # Small style adjustments to look closer to Anki
-        self._apply_light_styling()
+        header = self.deck_widget.header()
+        hfont = header.font()
+        hfont.setBold(True)
+        hfont.setPointSize(14)
+        hfont.setUnderline(True)
+        header.setFont(hfont)
+        header.setStyleSheet("QHeaderView::section { background: transparent; color: white; }")
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
 
-    def _apply_light_styling(self):
-        # Use a UI font similar to Anki's default (system dependent)
+        # Make item font larger
         font = QFont()
-        font.setPointSize(10)
-        self.setFont(font)
-
-        # Minimal toolbar style to mimic flat look
-        self.toolbar.setStyleSheet("""
-            QToolBar { spacing: 8px; padding: 4px }
-            QToolButton { padding: 6px 10px; border: 0px; background: transparent; }
-            QToolButton:checked { background: #e6f0ff; border-radius: 4px; }
+        font.setPointSize(14)
+        self.deck_widget.setFont(font)
+        self.deck_widget.setIndentation(16)
+        # Dark rounded look for panel
+        self.deck_widget.setStyleSheet("""
+            QTreeWidget { background: #2f2f2f; border-radius: 12px; padding: 14px; }
+            QTreeWidget::item { padding: 10px 8px; }
+            QTreeWidget::item:selected { background: #1f1f1f; border-radius: 8px; }
         """)
 
-        # Table row spacing and alternate colors like Anki uses
-        self.deck_table.setAlternatingRowColors(True)
-        self.deck_table.setStyleSheet("""
-            QTreeWidget { selection-background-color: #d0e7ff; }
-            QTreeWidget::item { padding: 6px; }
-        """)
+        mid_box.addWidget(self.deck_widget)
+        mid_box.addItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
 
-    def _populate_demo_decks(self):
-        """
-        Create a demo hierarchy of decks and fill counts.
-        This mirrors the nested-deck behaviour in Anki.
-        """
-        # Example tree structure: list of tuples (path, counts)
+        central_layout.addItem(QSpacerItem(20, 24, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Example demo data similar to your screenshot
         demo = [
-            (["Default"], (3, 1, 5)),
-            (["Languages", "Japanese"], (7, 2, 13)),
-            (["Languages", "Spanish"], (2, 0, 8)),
-            (["Math", "Calculus", "Derivatives"], (1, 0, 0)),
-            (["Math", "Calculus", "Integrals"], (0, 0, 4)),
-            (["Misc"], (5, 4, 2)),
+            (["Core 6000"], (0,0,0)),
+            (["Dictionaries of Grammar Sentences", "1 - Basic"], (10,1,2)),
+            (["Dictionaries of Grammar Sentences", "2 - Intermediate"], (30,1,2)),
+            (["Dictionaries of Grammar Sentences", "3 - Advanced"], (30,0,0)),
+            (["Sentence Vocab"], (30,2,1)),
+            (["Misc"], (5,4,2)),
         ]
 
-        # Build left QStandardItemModel for deck_tree
-        model = QStandardItemModel()
-        root_item = model.invisibleRootItem()
-
-        # We'll also populate right-side QTreeWidget with the same structure
-        self.deck_table.clear()
-
-        left_nodes = {}   # map tuple path -> QStandardItem
-        right_nodes = {}  # map tuple path -> QTreeWidgetItem
-
+        # Create items and a hidden settings button widget per item
+        self.settings_widgets = {}
         for path, counts in demo:
-            # 'path' is e.g. ["Languages", "Japanese"] or single-element ["Default"]
-            p_tuple = tuple(path)
-            # Ensure parent chain exists for left model
-            parent_item = root_item
-            parent_key = ()
-            for idx, name in enumerate(path):
-                parent_key = parent_key + (name,)
-                if parent_key not in left_nodes:
-                    item = QStandardItem(name)
-                    item.setEditable(False)
-                    # Light bolding for top-level decks
-                    if idx == 0:
-                        f = item.font()
-                        f.setBold(True)
-                        item.setFont(f)
-                    parent_item.appendRow(item)
-                    left_nodes[parent_key] = item
-                parent_item = left_nodes[parent_key]
-
-        # Assign the model to the tree
-        self.deck_tree.setModel(model)
-        self.deck_tree.expandAll()
-
-        # Now populate right tree widget mirroring structure, with counts
-        # To preserve nested structure we build nodes similarly
-        right_root = self.deck_table.invisibleRootItem()
-        # we need a helper to get/create nodes in the right tree
-        def get_or_create_right_node(path_parts):
-            key = tuple(path_parts)
-            if key in right_nodes:
-                return right_nodes[key]
-            if len(path_parts) == 1:
-                node = QTreeWidgetItem(self.deck_table, [path_parts[0]])
-                node.setExpanded(True)
-                right_nodes[key] = node
-                return node
-            else:
-                parent = get_or_create_right_node(path_parts[:-1])
-                node = QTreeWidgetItem(parent, [path_parts[-1]])
-                node.setExpanded(True)
-                right_nodes[key] = node
-                return node
-
-        # Fill counts
-        for path, counts in demo:
-            node = get_or_create_right_node(path)
+            parent = None
+            for i, name in enumerate(path):
+                if parent is None:
+                    top = self._find_top_item(name)
+                    if top is None:
+                        item = QTreeWidgetItem(self.deck_widget, [name, "", "", ""])
+                        item.setExpanded(True)
+                    else:
+                        item = top
+                else:
+                    ch = self._find_child_item(parent, name)
+                    if ch is None:
+                        item = QTreeWidgetItem(parent, [name, "", "", ""])
+                        item.setExpanded(True)
+                    else:
+                        item = ch
+                parent = item
+            # set counts on final item
             new_c, learn_c, due_c = counts
-            node.setText(1, str(new_c))
-            node.setText(2, str(learn_c))
-            node.setText(3, str(due_c))
+            self._set_count_for_item(parent, new_c, 1)
+            self._set_count_for_item(parent, learn_c, 2)
+            self._set_count_for_item(parent, due_c, 3)
+            # create settings button widget for the item (hidden by default)
+            settings_btn = QToolButton()
+            settings_btn.setText("⚙")
+            settings_btn.setCursor(Qt.PointingHandCursor)
+            settings_btn.setStyleSheet("QToolButton { background: transparent; color: #cccccc; border: none; font-size: 16px; }")
+            settings_btn.clicked.connect(partial(self.open_blank, "Deck options: " + " / ".join(path)))
+            container = QWidget()
+            cl = QHBoxLayout(container)
+            cl.setContentsMargins(0, 0, 8, 0)
+            cl.addStretch()
+            cl.addWidget(settings_btn)
+            container.setVisible(False)
+            # put container into the 3rd column (so it sits to the right of 'Due')
+            self.deck_widget.setItemWidget(parent, 3, container)
+            self.settings_widgets[parent] = container
 
-        # Expand all in the right widget and adjust column widths
-        self.deck_table.expandAll()
-        self.deck_table.header().resizeSection(0, 380)
+        # Enable mouse tracking for itemEntered to work (show/hide settings)
+        self.deck_widget.setMouseTracking(True)
+        self.deck_widget.viewport().setMouseTracking(True)
+        self.deck_widget.itemEntered.connect(self._on_item_hover)
+        # ensure settings hidden when leaving
+        self.deck_widget.viewport().leaveEvent = self._on_viewport_leave
 
-        # Select initial first deck (Default)
-        # Find index of first top-level node in left tree
-        idx = model.index(0, 0)
-        if idx.isValid():
-            self.deck_tree.setCurrentIndex(idx)
+    def _find_top_item(self, name):
+        for i in range(self.deck_widget.topLevelItemCount()):
+            it = self.deck_widget.topLevelItem(i)
+            if it.text(0) == name:
+                return it
+        return None
 
-    def _on_tree_selection_changed(self, selected, deselected):
-        # respond to tree selection by highlighting matching item in right tree
-        sel_indexes = self.deck_tree.selectionModel().selectedIndexes()
-        if not sel_indexes:
-            return
-        index = sel_indexes[0]
-        # build the path from the index to the root
-        model = self.deck_tree.model()
-        path_parts = []
-        cur = index
-        while cur.isValid():
-            path_parts.insert(0, model.data(cur))
-            cur = cur.parent()
-        # Find corresponding right-side node
-        # Use recursive search in deck_table
-        def find_node_containing(parent_item, target_name):
-            for i in range(parent_item.childCount()):
-                child = parent_item.child(i)
-                if child.text(0) == target_name:
-                    return child
-            return None
+    def _find_child_item(self, parent, name):
+        for i in range(parent.childCount()):
+            it = parent.child(i)
+            if it.text(0) == name:
+                return it
+        return None
 
-        # Walk down right-side tree to match the same path
-        parent = self.deck_table.invisibleRootItem()
-        match = None
-        for part in path_parts:
-            match = find_node_containing(parent, part)
-            if match is None:
-                break
-            parent = match
-        if match:
-            # Clear previous selection and select this row
-            self.deck_table.setCurrentItem(match)
-            self.status.showMessage(f"Selected deck: {' / '.join(path_parts)}")
+    def _set_count_for_item(self, item, val, col):
+        txt = str(val) if val is not None and val != 0 else "0"
+        item.setText(col, txt)
+        print("col: ", col)
+        # color logic
+        if val == 0:
+            color = "#9e9e9e"
         else:
-            self.deck_table.setCurrentItem(None)
-            self.status.showMessage("Selected deck not found on right pane")
+            if col == 1:
+                color = "#4ea0ff"  # blue
+            elif col == 2:
+                color = "#ff6b6b"  # red
+            elif col == 3:
+                color = "#4cd97b"  # green
+            else:
+                color = "#e6e6e6"
+        # set foreground color
+        item.setForeground(col, QBrush(QColor(color)))
 
-    def _open_blank_window(self, title: str):
+    def _on_item_hover(self, item, column):
+        # hide all settings first
+        for w in self.settings_widgets.values():
+            w.setVisible(False)
+        if item in self.settings_widgets:
+            self.settings_widgets[item].setVisible(True)
+
+    def _on_viewport_leave(self, event):
+        for w in self.settings_widgets.values():
+            w.setVisible(False)
+        return super(QTreeWidget, self.deck_widget).leaveEvent(event)
+
+    def open_blank(self, title):
         dlg = BlankDialog(title, parent=self)
         dlg.setWindowModality(False)
         dlg.show()
 
-    def _on_decks_toggled(self, checked):
-        # Keep Decks button checked (it represents the active main view)
-        self.act_decks.setChecked(True)
-        # Could trigger an explicit refresh; for now, just update status
-        self.status.showMessage("Decks (main view)")
-
 def main():
     app = QApplication(sys.argv)
-    win = DecksWindow()
+    # global font a little bigger
+    f = app.font()
+    f.setPointSize(12)
+    app.setFont(f)
+    win = DecksMockup()
     win.show()
     app.exec_()
-
 
 if __name__ == "__main__":
     main()
